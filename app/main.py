@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.security import get_current_user
@@ -54,10 +54,24 @@ def create_application(
 
 @app.get("/applications", response_model=list[schemas.ApplicationRead])
 def list_applications(
+    status: str | None = None,
+    company: str | None = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return db.query(models.Application).filter(models.Application.user_id == current_user.id).all()
+    query = db.query(models.Application).filter(models.Application.user_id == current_user.id)
+    if status:
+        query = query.filter(models.Application.status == status)
+    if company:
+        query = query.filter(models.Application.company.ilike(f"%{company}%"))
+    return (
+        query.order_by(models.Application.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @app.patch("/applications/{application_id}", response_model=schemas.ApplicationRead)
