@@ -1,5 +1,5 @@
 from datetime import datetime
-
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
@@ -19,21 +19,23 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
+Status = Literal["saved", "applied", "interview", "offer", "rejected"]
+
 class ApplicationCreate(BaseModel):
-    company: str
-    role: str
+    company: str = Field(min_length=1, max_length=200)
+    role: str = Field(min_length=1, max_length=200)
     link: str | None = None
-    salary: int | None = None
-    status: str = "saved"
+    salary: int | None = Field(default=None, ge=0)
+    status: Status = "saved"
     notes: str | None = None
 
 
 class ApplicationUpdate(BaseModel):
-    company: str | None = None
-    role: str | None = None
+    company: str | None = Field(default=None, min_length=1, max_length=200)
+    role: str | None = Field(default=None, min_length=1, max_length=200)
     link: str | None = None
-    salary: int | None = None
-    status: str | None = None
+    salary: int | None = Field(default=None, ge=0)
+    status: Status | None = None
     notes: str | None = None
 
 

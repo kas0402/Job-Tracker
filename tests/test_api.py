@@ -75,3 +75,37 @@ def test_history_is_private(client, auth_headers):
     login = client.post("/login", data={"username": "b@example.com", "password": "password123"})
     other = {"Authorization": f"Bearer {login.json()['access_token']}"}
     assert client.get(f"/applications/{app_id}/history", headers=other).status_code == 404
+
+def test_invalid_status_rejected(client, auth_headers):
+    r = client.post(
+        "/applications",
+        json={"company": "SAP", "role": "Dev", "status": "banana"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
+
+
+def test_negative_salary_rejected(client, auth_headers):
+    r = client.post(
+        "/applications",
+        json={"company": "SAP", "role": "Dev", "salary": -5},
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
+
+
+def test_empty_company_rejected(client, auth_headers):
+    r = client.post(
+        "/applications", json={"company": "", "role": "Dev"}, headers=auth_headers
+    )
+    assert r.status_code == 422
+
+
+def test_patch_invalid_status_rejected(client, auth_headers):
+    app_id = client.post(
+        "/applications", json={"company": "SAP", "role": "Dev"}, headers=auth_headers
+    ).json()["id"]
+    r = client.patch(
+        f"/applications/{app_id}", json={"status": "banana"}, headers=auth_headers
+    )
+    assert r.status_code == 422
