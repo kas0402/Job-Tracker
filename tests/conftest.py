@@ -1,9 +1,9 @@
 import os
-
+from app import cache
 os.environ["DATABASE_URL"] = (
     "postgresql+psycopg://jobtracker:jobtracker_pass@localhost:5432/jobtracker_test"
 )
-
+os.environ["REDIS_URL"] = "redis://localhost:6379/1"
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,6 +15,7 @@ from app.main import app
 def clean_db():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    cache._client.flushdb()
     yield
 
 

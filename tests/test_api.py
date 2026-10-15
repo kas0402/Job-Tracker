@@ -109,3 +109,49 @@ def test_patch_invalid_status_rejected(client, auth_headers):
         f"/applications/{app_id}", json={"status": "banana"}, headers=auth_headers
     )
     assert r.status_code == 422
+
+def test_stats_cached_and_invalidated(client, auth_headers):
+    client.post(
+        "/applications", json={"company": "A", "role": "Dev", "status": "applied"},
+        headers=auth_headers,
+    )
+    first = client.get("/stats", headers=auth_headers).json()
+    assert first == {"total": 1, "by_status": {"applied": 1}}
+
+    from app import cache
+    assert cache._client.keys("stats:*"), "stats should be cached after the first call"
+
+    client.post(
+        "/applications", json={"company": "B", "role": "Dev", "status": "applied"},
+        headers=auth_headers,
+    )
+    assert not cache._client.keys("stats:*"), "a write should clear the cache"
+    second = client.get("/stats", headers=auth_headers).json()
+    assert second == {"total": 2, "by_status": {"applied": 2}}
+
+
+def test_stats_cache_is_per_user(client, auth_headers):
+    client.post("/applications", json={"company": "A", "role": "Dev"}, headers=auth_headers)
+    client.get("/stats", headers=auth_headers)
+
+    client.post("/register", json={"email": "b@example.com", "password": "password123"})
+    login = client.post("/login", data={"username": "b@example.com", "password": "password123"})
+    other = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    assert client.get("/stats", headers=other).json() == {"total": 0, "by_status": {}}
+
+
+def test_stats_work_when_redis_is_down(client, auth_headers, monkeypatch):
+    import redis
+    from app import cache
+
+    def broken(*args, **kwargs):
+        raise redis.RedisError("down")
+
+    monkeypatch.setattr(cache._client, "get", broken)
+    monkeypatch.setattr(cache._client, "set", broken)
+    monkeypatch.setattr(cache._client, "delete", broken)
+
+    client.post("/applications", json={"company": "A", "role": "Dev"}, headers=auth_headers)
+    r = client.get("/stats", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["total"] == 1

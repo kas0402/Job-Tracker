@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.security import get_current_user
 from sqlalchemy import func
 
-from app import models, schemas
+from app import models, schemas, cache
 from app.database import get_db
 from app.security import create_access_token, hash_password, verify_password
 
@@ -53,6 +53,7 @@ def create_application(
         application_id=application.id, old_status=None, new_status=application.status
     ))
     db.commit()
+    cache.invalidate_stats(current_user.id)
     db.refresh(application)
     return application
 
@@ -105,6 +106,7 @@ def update_application(
         ))
 
     db.commit()
+    cache.invalidate_stats(current_user.id)
     db.refresh(application)
     return application
 
@@ -123,6 +125,7 @@ def delete_application(
         raise HTTPException(status_code=404, detail="Application not found")
     db.delete(application)
     db.commit()
+    cache.invalidate_stats(current_user.id)
 
 @app.get("/applications/{application_id}/history", response_model=list[schemas.StatusHistoryRead])
 def application_history(
@@ -145,6 +148,10 @@ def stats(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    cached = cache.get_cached_stats(current_user.id)
+    if cached is not None:
+        return cached
+
     rows = (
         db.query(models.Application.status, func.count(models.Application.id))
         .filter(models.Application.user_id == current_user.id)
@@ -152,4 +159,6 @@ def stats(
         .all()
     )
     by_status = {status_name: count for status_name, count in rows}
-    return schemas.Stats(total=sum(by_status.values()), by_status=by_status)
+    result = schemas.Stats(total=sum(by_status.values()), by_status=by_status)
+    cache.set_cached_stats(current_user.id, result.model_dump())
+    return result
