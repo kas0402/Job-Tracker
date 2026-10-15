@@ -44,3 +44,34 @@ def test_users_cannot_see_each_others_data(client, auth_headers):
     assert client.get("/applications", headers=other).json() == []
     r = client.patch(f"/applications/{created['id']}", json={"status": "offer"}, headers=other)
     assert r.status_code == 404
+
+def test_status_history_recorded(client, auth_headers):
+    app_id = client.post(
+        "/applications", json={"company": "SAP", "role": "Dev"}, headers=auth_headers
+    ).json()["id"]
+    client.patch(f"/applications/{app_id}", json={"status": "applied"}, headers=auth_headers)
+    client.patch(f"/applications/{app_id}", json={"status": "applied"}, headers=auth_headers)
+
+    history = client.get(f"/applications/{app_id}/history", headers=auth_headers).json()
+    assert [h["new_status"] for h in history] == ["saved", "applied"]
+
+
+def test_stats_counts_per_status(client, auth_headers):
+    for status_value in ["applied", "applied", "interview"]:
+        client.post(
+            "/applications",
+            json={"company": "X", "role": "Dev", "status": status_value},
+            headers=auth_headers,
+        )
+    stats = client.get("/stats", headers=auth_headers).json()
+    assert stats == {"total": 3, "by_status": {"applied": 2, "interview": 1}}
+
+
+def test_history_is_private(client, auth_headers):
+    app_id = client.post(
+        "/applications", json={"company": "SAP", "role": "Dev"}, headers=auth_headers
+    ).json()["id"]
+    client.post("/register", json={"email": "b@example.com", "password": "password123"})
+    login = client.post("/login", data={"username": "b@example.com", "password": "password123"})
+    other = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    assert client.get(f"/applications/{app_id}/history", headers=other).status_code == 404

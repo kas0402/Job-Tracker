@@ -31,3 +31,22 @@ class Application(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("User", back_populates="applications")
+    history = relationship(
+        "StatusHistory",
+        back_populates="application",
+        cascade="all, delete-orphan",
+        order_by="StatusHistory.changed_at",
+    )
+
+class StatusHistory(Base):
+    __tablename__ = "status_history"
+
+    id = Column(Integer, primary_key=True)
+    application_id = Column(
+        Integer, ForeignKey("applications.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    old_status = Column(String)
+    new_status = Column(String, nullable=False)
+    changed_at = Column(DateTime, default=datetime.utcnow)
+
+    application = relationship("Application", back_populates="history")

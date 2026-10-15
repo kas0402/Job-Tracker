@@ -42,3 +42,15 @@ class ApplicationRead(ApplicationCreate):
 
     id: int
     created_at: datetime
+
+class StatusHistoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    old_status: str | None
+    new_status: str
+    changed_at: datetime
+
+
+class Stats(BaseModel):
+    total: int
+    by_status: dict[str, int]

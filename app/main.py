@@ -2,6 +2,7 @@ from fastapi import Depends, FastAPI, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.security import get_current_user
+from sqlalchemy import func
 
 from app import models, schemas
 from app.database import get_db
@@ -47,10 +48,13 @@ def create_application(
 ):
     application = models.Application(**data.model_dump(), user_id=current_user.id)
     db.add(application)
+    db.flush()  # assigns application.id without committing
+    db.add(models.StatusHistory(
+        application_id=application.id, old_status=None, new_status=application.status
+    ))
     db.commit()
     db.refresh(application)
     return application
-
 
 @app.get("/applications", response_model=list[schemas.ApplicationRead])
 def list_applications(
@@ -88,12 +92,21 @@ def update_application(
     )
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found")
-    for field, value in data.model_dump(exclude_unset=True).items():
+
+    changes = data.model_dump(exclude_unset=True)
+    old_status = application.status
+    for field, value in changes.items():
         setattr(application, field, value)
+    if "status" in changes and application.status != old_status:
+        db.add(models.StatusHistory(
+            application_id=application.id,
+            old_status=old_status,
+            new_status=application.status,
+        ))
+
     db.commit()
     db.refresh(application)
     return application
-
 
 @app.delete("/applications/{application_id}", status_code=204)
 def delete_application(
@@ -110,3 +123,33 @@ def delete_application(
         raise HTTPException(status_code=404, detail="Application not found")
     db.delete(application)
     db.commit()
+
+@app.get("/applications/{application_id}/history", response_model=list[schemas.StatusHistoryRead])
+def application_history(
+    application_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    application = (
+        db.query(models.Application)
+        .filter(models.Application.id == application_id, models.Application.user_id == current_user.id)
+        .first()
+    )
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return application.history
+
+
+@app.get("/stats", response_model=schemas.Stats)
+def stats(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    rows = (
+        db.query(models.Application.status, func.count(models.Application.id))
+        .filter(models.Application.user_id == current_user.id)
+        .group_by(models.Application.status)
+        .all()
+    )
+    by_status = {status_name: count for status_name, count in rows}
+    return schemas.Stats(total=sum(by_status.values()), by_status=by_status)
