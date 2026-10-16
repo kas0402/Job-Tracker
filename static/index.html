@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Tracker</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f4f5f7; margin: 0; color: #222; }
+  main { max-width: 820px; margin: 0 auto; padding: 24px 16px; }
+  h1 { margin-top: 0; }
+  .card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  input, select, textarea, button { font: inherit; padding: 8px; margin: 4px 0; }
+  input, select, textarea { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; }
+  button { cursor: pointer; border: 0; border-radius: 6px; background: #2563eb; color: #fff; padding: 8px 14px; }
+  button.secondary { background: #6b7280; }
+  button.danger { background: #dc2626; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > * { flex: 1; min-width: 120px; }
+  .badge { display: inline-block; background: #e5e7eb; border-radius: 12px; padding: 4px 10px; margin: 2px; }
+  .app { border-top: 1px solid #eee; padding: 10px 0; }
+  .app:first-child { border-top: 0; }
+  .meta { color: #666; font-size: 14px; }
+  .error { color: #b91c1c; min-height: 1.2em; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Job Tracker</h1>
+
+  <section id="auth" class="card">
+    <h2>Login or register</h2>
+    <input id="email" type="email" placeholder="Email" autocomplete="username">
+    <input id="password" type="password" placeholder="Password (min 8 characters)" autocomplete="current-password">
+    <div class="row">
+      <button id="login-btn">Login</button>
+      <button id="register-btn" class="secondary">Register</button>
+    </div>
+    <p id="auth-error" class="error"></p>
+  </section>
+
+  <section id="dashboard" hidden>
+    <div class="card">
+      <div class="row">
+        <strong id="who"></strong>
+        <button id="logout-btn" class="secondary">Logout</button>
+      </div>
+      <div id="stats"></div>
+    </div>
+
+    <div class="card">
+      <h2>Add application</h2>
+      <div class="row">
+        <input id="company" placeholder="Company">
+        <input id="role" placeholder="Role">
+      </div>
+      <div class="row">
+        <input id="link" placeholder="Job link (optional)">
+        <input id="salary" type="number" min="0" placeholder="Salary (optional)">
+        <select id="status"></select>
+      </div>
+      <textarea id="notes" rows="2" placeholder="Notes (optional)"></textarea>
+      <button id="add-btn">Add</button>
+      <p id="form-error" class="error"></p>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <h2>Your applications</h2>
+        <select id="filter"></select>
+      </div>
+      <div id="list"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const STATUSES = ["saved", "applied", "interview", "offer", "rejected"];
+let token = localStorage.getItem("token");
+const $ = (id) => document.getElementById(id);
+
+async function api(path, options = {}) {
+  const headers = options.headers || {};
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(path, { ...options, headers });
+  if (res.status === 401 && token) {
+    logout();
+    throw new Error("Session expired, please log in again.");
+  }
+  return res;
+}
+
+async function errorText(res) {
+  try {
+    const body = await res.json();
+    if (typeof body.detail === "string") return body.detail;
+    if (Array.isArray(body.detail)) return body.detail.map((d) => d.loc.slice(1).join(".") + ": " + d.msg).join("; ");
+  } catch (e) {}
+  return "Request failed (" + res.status + ")";
+}
+
+async function login() {
+  $("auth-error").textContent = "";
+  const body = new URLSearchParams({ username: $("email").value, password: $("password").value });
+  const res = await fetch("/login", { method: "POST", body });
+  if (!res.ok) { $("auth-error").textContent = await errorText(res); return; }
+  token = (await res.json()).access_token;
+  localStorage.setItem("token", token);
+  await showDashboard();
+}
+
+async function register() {
+  $("auth-error").textContent = "";
+  const res = await fetch("/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: $("email").value, password: $("password").value }),
+  });
+  if (!res.ok) { $("auth-error").textContent = await errorText(res); return; }
+  await login();
+}
+
+function logout() {
+  token = null;
+  localStorage.removeItem("token");
+  $("dashboard").hidden = true;
+  $("auth").hidden = false;
+}
+
+async function showDashboard() {
+  const me = await api("/me");
+  if (!me.ok) return;
+  $("who").textContent = "Signed in as " + (await me.json()).email;
+  $("auth").hidden = true;
+  $("dashboard").hidden = false;
+  await Promise.all([loadStats(), loadList()]);
+}
+
+async function loadStats() {
+  const res = await api("/stats");
+  if (!res.ok) return;
+  const s = await res.json();
+  const box = $("stats");
+  box.replaceChildren();
+  const total = document.createElement("span");
+  total.className = "badge";
+  total.textContent = "Total: " + s.total;
+  box.append(total);
+  for (const [name, count] of Object.entries(s.by_status)) {
+    const b = document.createElement("span");
+    b.className = "badge";
+    b.textContent = name + ": " + count;
+    box.append(b);
+  }
+}
+
+async function loadList() {
+  const filter = $("filter").value;
+  const query = filter ? "?status=" + encodeURIComponent(filter) + "&limit=100" : "?limit=100";
+  const res = await api("/applications" + query);
+  if (!res.ok) return;
+  const items = await res.json();
+  const list = $("list");
+  list.replaceChildren();
+  if (items.length === 0) {
+    list.textContent = "No applications yet.";
+    return;
+  }
+  for (const a of items) list.append(renderApp(a));
+}
+
+function renderApp(a) {
+  const div = document.createElement("div");
+  div.className = "app";
+  const title = document.createElement("strong");
+  title.textContent = a.company + " - " + a.role;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = [a.salary != null ? "Salary: " + a.salary : "", a.notes || ""].filter(Boolean).join(" | ");
+  const row = document.createElement("div");
+  row.className = "row";
+
+  const sel = document.createElement("select");
+  for (const s of STATUSES) sel.append(new Option(s, s, false, s === a.status));
+  sel.onchange = async () => {
+    const res = await api("/applications/" + a.id, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: sel.value }),
+    });
+    if (res.ok) { await loadStats(); await loadList(); }
+  };
+
+  const del = document.createElement("button");
+  del.className = "danger";
+  del.textContent = "Delete";
+  del.onclick = async () => {
+    if (!confirm("Delete " + a.company + "?")) return;
+    const res = await api("/applications/" + a.id, { method: "DELETE" });
+    if (res.ok) { await loadStats(); await loadList(); }
+  };
+
+  row.append(sel, del);
+  div.append(title, meta);
+  if (a.link) {
+    const link = document.createElement("a");
+    link.href = a.link;
+    link.textContent = "Job link";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    div.append(link);
+  }
+  div.append(row);
+  return div;
+}
+
+async function addApplication() {
+  $("form-error").textContent = "";
+  const salary = $("salary").value;
+  const payload = {
+    company: $("company").value,
+    role: $("role").value,
+    status: $("status").value,
+    link: $("link").value || null,
+    salary: salary === "" ? null : Number(salary),
+    notes: $("notes").value || null,
+  };
+  const res = await api("/applications", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) { $("form-error").textContent = await errorText(res); return; }
+  for (const id of ["company", "role", "link", "salary", "notes"]) $(id).value = "";
+  await Promise.all([loadStats(), loadList()]);
+}
+
+for (const s of STATUSES) $("status").append(new Option(s, s));
+$("filter").append(new Option("All statuses", ""));
+for (const s of STATUSES) $("filter").append(new Option(s, s));
+$("filter").onchange = loadList;
+$("login-btn").onclick = login;
+$("register-btn").onclick = register;
+$("logout-btn").onclick = logout;
+$("add-btn").onclick = addApplication;
+if (token) showDashboard();
+</script>
+</body>
+</html>

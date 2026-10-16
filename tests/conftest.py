@@ -1,18 +1,19 @@
 import os
-from app import cache
+
 os.environ["DATABASE_URL"] = (
     "postgresql+psycopg://jobtracker:jobtracker_pass@localhost:5432/jobtracker_test"
 )
 os.environ["REDIS_URL"] = "redis://localhost:6379/1"
 import pytest
 from fastapi.testclient import TestClient
-
+from app import cache
 from app.database import Base, engine
 from app.main import app
 
 
 @pytest.fixture(autouse=True)
 def clean_db():
+    assert engine.url.database == "jobtracker_test", f"Refusing to run on {engine.url.database}"
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     cache._client.flushdb()

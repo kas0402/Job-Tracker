@@ -7,6 +7,10 @@ from sqlalchemy import func
 from app import models, schemas, cache
 from app.database import get_db
 from app.security import create_access_token, hash_password, verify_password
+from pathlib import Path
+
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Job Tracker API")
 
@@ -162,3 +166,11 @@ def stats(
     result = schemas.Stats(total=sum(by_status.values()), by_status=by_status)
     cache.set_cached_stats(current_user.id, result.model_dump())
     return result
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/ui/")

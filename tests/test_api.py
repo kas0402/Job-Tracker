@@ -155,3 +155,8 @@ def test_stats_work_when_redis_is_down(client, auth_headers, monkeypatch):
     r = client.get("/stats", headers=auth_headers)
     assert r.status_code == 200
     assert r.json()["total"] == 1
+
+def test_frontend_served(client):
+    r = client.get("/ui/")
+    assert r.status_code == 200
+    assert "Job Tracker" in r.text

@@ -9,6 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --default-timeout=100 --retries 10 -r requirements.txt
 
 COPY app ./app
+COPY static ./static
 COPY alembic ./alembic
 COPY alembic.ini .
 
